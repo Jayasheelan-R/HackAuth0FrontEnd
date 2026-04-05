@@ -1,7 +1,8 @@
 "use client";
 
 import { useAuth0 } from "@auth0/auth0-react";
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import "./globals.css";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:5004";
 
@@ -19,12 +20,15 @@ export default function Home() {
   const [result, setResult] = useState("");
   const [repo, setRepo] = useState("Jayasheelan-R/ai-devops-agent");
   const [prNumber, setPrNumber] = useState("");
+  const [credentials, setCredentials] = useState([]);
+  const [credsLoading, setCredsLoading] = useState(false);
+  const [revoking, setRevoking] = useState(null);
 
-  if (isLoading) return <div>Loading...</div>;
+  useEffect(() => {
+    if (isAuthenticated) fetchCredentials();
+  }, [isAuthenticated]);
 
-  /* =========================
-     🔐 AUTH HELPERS
-  ========================== */
+  if (isLoading) return <div className="da-splash"><span className="da-splash-text">initializing agent</span><span className="da-cursor">_</span></div>;
 
   const login = () =>
     loginWithRedirect({
@@ -55,10 +59,6 @@ export default function Home() {
     }
   };
 
-  /* =========================
-     🌐 API HELPER
-  ========================== */
-
   const apiRequest = async (url, method, token, body) => {
     const res = await fetch(`${API_BASE}${url}`, {
       method,
@@ -70,25 +70,45 @@ export default function Home() {
     });
 
     const contentType = res.headers.get("content-type") || "";
-
     if (!res.ok) {
       const text = await res.text().catch(() => "");
       throw new Error(`${res.status} ${res.statusText} ${text}`);
     }
-
     return contentType.includes("application/json")
       ? res.json()
       : { __text: await res.text() };
   };
 
-  /* =========================
-     🧠 UI HELPERS
-  ========================== */
+  const fetchCredentials = async () => {
+    try {
+      setCredsLoading(true);
+      const token = await getToken();
+      const data = await apiRequest("/agent/credentials", "GET", token);
+      setCredentials(data.credentials || []);
+    } catch {
+      setCredentials([]);
+    } finally {
+      setCredsLoading(false);
+    }
+  };
+
+  const handleRevoke = async (credentialId, credentialName) => {
+    if (!confirm(`Revoke agent access to ${credentialName}? This cannot be undone.`)) return;
+    try {
+      setRevoking(credentialId);
+      const token = await getToken();
+      await apiRequest(`/agent/credentials/${credentialId}`, "DELETE", token);
+      setCredentials((prev) => prev.filter((c) => c.id !== credentialId));
+      appendOutput(`🔒 Access revoked: ${credentialName}`);
+    } catch (err) {
+      appendOutput(`❌ Revoke failed: ${err.message}`);
+    } finally {
+      setRevoking(null);
+    }
+  };
 
   const resetOutput = (text = "") => setResult(text);
-
-  const appendOutput = (text) =>
-    setResult((prev) => prev + text + "\n");
+  const appendOutput = (text) => setResult((prev) => prev + text + "\n");
 
   const simulateThinking = async () => {
     const steps = [
@@ -97,7 +117,6 @@ export default function Home() {
       "🧠 AI analyzing...",
       "🚦 Decision making...",
     ];
-
     for (const step of steps) {
       appendOutput(step);
       await new Promise((r) => setTimeout(r, 500));
@@ -105,48 +124,24 @@ export default function Home() {
   };
 
   const validateInputs = (requirePR = false) => {
-    if (!repo || !repo.includes("/")) {
-      throw new Error("Invalid repo (format: owner/repo)");
-    }
-    if (requirePR && (!prNumber || isNaN(prNumber))) {
-      throw new Error("Invalid PR number");
-    }
+    if (!repo || !repo.includes("/")) throw new Error("Invalid repo (format: owner/repo)");
+    if (requirePR && (!prNumber || isNaN(prNumber))) throw new Error("Invalid PR number");
   };
-
-  /* =========================
-     🚀 ACTIONS
-  ========================== */
 
   const runAgent = async () => {
     try {
       setLoading(true);
       resetOutput("🤖 Agent started...\n");
-
       validateInputs();
-
       await simulateThinking();
-
       const token = await getToken();
-
-      const data = await apiRequest(
-        "/github/review",
-        "POST",
-        token,
-        {
-          repo,
-          prNumber: Number(prNumber) || 8, // fallback
-        }
-      );
-
-      if (data.__text) {
-        resetOutput(`❌ ${data.__text}`);
-      } else {
-        resetOutput(
-          `✅ Analysis Complete\n\n🚀 PR Review Completed\n\nComments Added`
-        );
-      }
+      const data = await apiRequest("/github/review", "POST", token, {
+        repo,
+        prNumber: Number(prNumber) || 8,
+      });
+      if (data.__text) resetOutput(`❌ ${data.__text}`);
+      else resetOutput("✅ Analysis Complete\n\n🚀 PR Review Completed\n\nComments Added");
     } catch (err) {
-      console.error(err);
       resetOutput(`❌ ${err.message}`);
     } finally {
       setLoading(false);
@@ -157,90 +152,203 @@ export default function Home() {
     try {
       setLoading(true);
       resetOutput("⏳ Creating issue...\n");
-
       validateInputs();
-
       const token = await getToken();
-
-      const data = await apiRequest(
-        "/github/issue",
-        "POST",
-        token,
-        {
-          repo,
-          title: "AI Agent Issue",
-          body: "Created via AI DevOps Agent",
-        }
-      );
-
+      const data = await apiRequest("/github/issue", "POST", token, {
+        repo,
+        title: "AI Agent Issue",
+        body: "Created via AI DevOps Agent",
+      });
       resetOutput(`✅ Issue created:\n${data.html_url}`);
     } catch (err) {
-      console.error(err);
       resetOutput(`❌ ${err.message}`);
     } finally {
       setLoading(false);
     }
   };
 
-  /* =========================
-     🎨 UI
-  ========================== */
+  const scopeColor = (scope) => {
+    if (scope.includes("write") || scope.includes("delete")) return "scope-write";
+    if (scope.includes("read")) return "scope-read";
+    return "scope-other";
+  };
 
   return (
-    <div style={{ padding: 40, maxWidth: 900, margin: "auto" }}>
-      {!isAuthenticated ? (
-        <button onClick={login}>Login</button>
-      ) : (
-        <>
-          <h1>🤖 AI DevOps Agent</h1>
-          <p>Welcome {user?.name}</p>
+    <div className="da-root">
+      <div className="da-card">
 
-          <h3>Repository</h3>
-          <input
-            value={repo}
-            onChange={(e) => setRepo(e.target.value)}
-            placeholder="owner/repo"
-            style={{ width: "100%", padding: 10 }}
-          />
+        <div className="da-titlebar">
+          <div className="da-dots">
+            <div className="da-dot da-dot-r" />
+            <div className="da-dot da-dot-y" />
+            <div className="da-dot da-dot-g" />
+          </div>
+          <span className="da-titlebar-label">devops-agent · v1.0.0</span>
+          {isAuthenticated && (
+            <div className="da-status-pill">
+              <div className="da-pulse" />
+              LIVE
+            </div>
+          )}
+        </div>
 
-          
+        <div className="da-body">
+          {!isAuthenticated ? (
 
-          <button onClick={runAgent} disabled={loading}>
-            🚀 Run PR Check
-          </button>
+            <div className="da-login">
+              <div className="da-login-icon">🤖</div>
+              <h2>AI DevOps Agent</h2>
+              <p>Automated PR reviews and issue management — powered by AI, driven by your GitHub.</p>
+              <div className="da-login-actions">
+                <button className="da-btn da-btn-primary" onClick={login}>
+                  <span>⚡</span> Sign in with Auth0
+                </button>
+                <div className="da-login-divider">or</div>
+                <button className="da-btn da-btn-secondary" onClick={connectGitHub}>
+                  <span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z" />
+                    </svg>
+                  </span>
+                  Continue with GitHub
+                </button>
+              </div>
+            </div>
 
-          <button onClick={createIssue} disabled={loading}>
-            Create Issue
-          </button>
+          ) : (
 
-          <br /><br />
+            <>
+              <div className="da-hero">
+                <div className="da-eyebrow">// AI-Powered DevOps</div>
+                <div className="da-headline">Dev<span>Ops</span> Agent</div>
+                {user?.name && (
+                  <div className="da-user-badge">
+                    <span className="badge-icon">◈</span>
+                    {user.name}
+                  </div>
+                )}
+              </div>
 
-          <button
-            onClick={() =>
-              logout({ logoutParams: { returnTo: window.location.origin } })
-            }
-          >
-            Logout
-          </button>
+              <div className="da-section-label">
+                <span>🔑 Agent Permissions</span>
+                <span className="da-vault-badge">
+                  <span className="da-vault-dot" />
+                  Token Vault
+                </span>
+              </div>
 
-          <hr />
+              <div className="da-permissions-panel">
+                {credsLoading ? (
+                  <div className="da-perm-empty">
+                    <span className="da-loading-txt">⏳ Loading credentials from Token Vault...</span>
+                  </div>
+                ) : credentials.length === 0 ? (
+                  <div className="da-perm-empty">
+                    <span style={{ color: "var(--text-muted)", fontSize: 12 }}>
+                      No credentials stored in Token Vault
+                    </span>
+                    <button className="da-btn da-btn-secondary da-btn-sm" onClick={connectGitHub}>
+                      + Connect GitHub
+                    </button>
+                  </div>
+                ) : (
+                  credentials.map((cred) => (
+                    <div key={cred.id} className="da-perm-row">
+                      <div className="da-perm-left">
+                        <div className="da-perm-name">
+                          <span className="da-perm-dot" />
+                          {cred.name}
+                          <span className="da-perm-type">{cred.credential_type}</span>
+                        </div>
+                        <div className="da-perm-scopes">
+                          {(cred.scopes?.length ? cred.scopes : ["repo", "issues:write"]).map((s) => (
+                            <span key={s} className={`da-scope-badge ${scopeColor(s)}`}>{s}</span>
+                          ))}
+                        </div>
+                        <div className="da-perm-meta">
+                          granted {new Date(cred.created_at).toLocaleDateString()}
+                        </div>
+                      </div>
+                      <button
+                        className="da-btn-revoke"
+                        onClick={() => handleRevoke(cred.id, cred.name)}
+                        disabled={revoking === cred.id}
+                      >
+                        {revoking === cred.id ? "Revoking..." : "⎋ Revoke"}
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
 
-          <h3>🧠 Output</h3>
-          <pre
-            style={{
-              background: "#111",
-              color: "#0f0",
-              padding: 20,
-              borderRadius: 10,
-              minHeight: 200,
-              whiteSpace: "pre-wrap",
-            }}
-          >
-            {loading ? "⏳ Processing...\n\n" : ""}
-            {result}
-          </pre>
-        </>
-      )}
+              <hr className="da-divider" />
+
+              <div className="da-fields">
+                <div className="da-field">
+                  <label className="da-label">Target Repository</label>
+                  <div className="da-input-wrap">
+                    <span className="da-input-prefix">~/</span>
+                    <input
+                      className="da-input"
+                      value={repo}
+                      onChange={(e) => setRepo(e.target.value)}
+                      placeholder="owner/repo"
+                    />
+                  </div>
+                </div>
+                <div className="da-field">
+                  <label className="da-label">PR Number</label>
+                  <div className="da-input-wrap">
+                    <span className="da-input-prefix">#</span>
+                    <input
+                      className="da-input"
+                      value={prNumber}
+                      onChange={(e) => setPrNumber(e.target.value)}
+                      placeholder="e.g. 42"
+                      type="number"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="da-btn-row">
+                <button className="da-btn da-btn-primary" onClick={runAgent} disabled={loading}>
+                  <span>🚀</span> Run PR Check
+                </button>
+                <button className="da-btn da-btn-secondary" onClick={createIssue} disabled={loading}>
+                  <span>＋</span> Create Issue
+                </button>
+                <button
+                  className="da-btn da-btn-ghost"
+                  onClick={() => logout({ logoutParams: { returnTo: window.location.origin } })}
+                >
+                  ⎋ Logout
+                </button>
+              </div>
+
+              <hr className="da-divider" />
+
+              <div className="da-terminal">
+                <div className="da-terminal-header">
+                  <div className="da-terminal-title">
+                    <div className="da-terminal-dot" />
+                    output stream
+                  </div>
+                  <span className="da-terminal-tag">STDOUT</span>
+                </div>
+                {loading && <div className="da-loading-bar" />}
+                <div className="da-terminal-body">
+                  {loading && <span className="da-loading-txt">⏳ Processing...{"\n\n"}</span>}
+                  {result || (!loading && (
+                    <span className="da-empty-hint">{"// waiting for instructions..."}</span>
+                  ))}
+                  {!loading && <span className="da-cursor">_</span>}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
