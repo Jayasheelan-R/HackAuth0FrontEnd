@@ -22,27 +22,25 @@ export default function Home() {
   const [prNumber, setPrNumber] = useState("");
   const [credentials, setCredentials] = useState([]);
   const [credsLoading, setCredsLoading] = useState(false);
+  const [credsLoaded, setCredsLoaded] = useState(false);
   const [revoking, setRevoking] = useState(null);
 
   useEffect(() => {
     if (isAuthenticated) fetchCredentials();
   }, [isAuthenticated]);
 
-  if (isLoading) return <div className="da-splash"><span className="da-splash-text">initializing agent</span><span className="da-cursor">_</span></div>;
+  if (isLoading) return (
+    <div className="da-splash">
+      <span className="da-splash-text">initializing agent</span>
+      <span className="da-cursor">_</span>
+    </div>
+  );
 
-  const login = () =>
-    loginWithRedirect({
-      authorizationParams: {
-        audience: "https://my-api",
-        scope: "openid profile email offline_access",
-      },
-    });
-
-  const connectGitHub = () =>
+  const loginWithGitHub = () =>
     loginWithRedirect({
       authorizationParams: {
         connection: "github",
-        prompt: "consent",
+        prompt: "login",
         audience: "https://my-api",
         scope: "openid profile email offline_access",
       },
@@ -54,7 +52,7 @@ export default function Home() {
         authorizationParams: { audience: "https://my-api" },
       });
     } catch {
-      await login();
+      loginWithGitHub();
       throw new Error("Authentication required");
     }
   };
@@ -71,8 +69,12 @@ export default function Home() {
 
     const contentType = res.headers.get("content-type") || "";
     if (!res.ok) {
+      if (contentType.includes("application/json")) {
+        const json = await res.json().catch(() => null);
+        throw new Error(json?.error || `${res.status} ${res.statusText}`);
+      }
       const text = await res.text().catch(() => "");
-      throw new Error(`${res.status} ${res.statusText} ${text}`);
+      throw new Error(text || `${res.status} ${res.statusText}`);
     }
     return contentType.includes("application/json")
       ? res.json()
@@ -85,21 +87,23 @@ export default function Home() {
       const token = await getToken();
       const data = await apiRequest("/agent/credentials", "GET", token);
       setCredentials(data.credentials || []);
-    } catch {
+    } catch (err) {
       setCredentials([]);
+      appendOutput(`⚠️ Could not load credentials: ${err.message}`);
     } finally {
       setCredsLoading(false);
+      setCredsLoaded(true);
     }
   };
 
-  const handleRevoke = async (credentialId, credentialName) => {
-    if (!confirm(`Revoke agent access to ${credentialName}? This cannot be undone.`)) return;
+  const handleRevoke = async (provider, providerId) => {
+    if (!confirm(`Revoke agent access to ${provider}? This cannot be undone.`)) return;
     try {
-      setRevoking(credentialId);
+      setRevoking(provider);
       const token = await getToken();
-      await apiRequest(`/agent/credentials/${credentialId}`, "DELETE", token);
-      setCredentials((prev) => prev.filter((c) => c.id !== credentialId));
-      appendOutput(`🔒 Access revoked: ${credentialName}`);
+      await apiRequest(`/agent/credentials/${provider}/${providerId}`, "DELETE", token);
+      setCredentials((prev) => prev.filter((c) => c.provider !== provider));
+      appendOutput(`🔒 Access revoked: ${provider}`);
     } catch (err) {
       appendOutput(`❌ Revoke failed: ${err.message}`);
     } finally {
@@ -132,15 +136,16 @@ export default function Home() {
     try {
       setLoading(true);
       resetOutput("🤖 Agent started...\n");
-      validateInputs();
+      validateInputs(true);
       await simulateThinking();
       const token = await getToken();
       const data = await apiRequest("/github/review", "POST", token, {
         repo,
-        prNumber: Number(prNumber) || 8,
+        prNumber: Number(prNumber),
       });
       if (data.__text) resetOutput(`❌ ${data.__text}`);
-      else resetOutput("✅ Analysis Complete\n\n🚀 PR Review Completed\n\nComments Added");
+      else if (data.error) resetOutput(`❌ ${data.error}`);
+      else resetOutput(`✅ Review posted to PR #${prNumber}\n\n${data.review || ""}`);
     } catch (err) {
       resetOutput(`❌ ${err.message}`);
     } finally {
@@ -159,7 +164,8 @@ export default function Home() {
         title: "AI Agent Issue",
         body: "Created via AI DevOps Agent",
       });
-      resetOutput(`✅ Issue created:\n${data.html_url}`);
+      if (data.error) resetOutput(`❌ ${data.error}`);
+      else resetOutput(`✅ Issue created:\n${data.html_url}`);
     } catch (err) {
       resetOutput(`❌ ${err.message}`);
     } finally {
@@ -173,6 +179,8 @@ export default function Home() {
     return "scope-other";
   };
 
+  const hasGitHub = credentials.some((c) => c.provider === "github");
+
   return (
     <div className="da-root">
       <div className="da-card">
@@ -184,7 +192,7 @@ export default function Home() {
             <div className="da-dot da-dot-g" />
           </div>
           <span className="da-titlebar-label">devops-agent · v1.0.0</span>
-          {isAuthenticated && (
+          {isAuthenticated && hasGitHub && (
             <div className="da-status-pill">
               <div className="da-pulse" />
               LIVE
@@ -200,17 +208,37 @@ export default function Home() {
               <h2>AI DevOps Agent</h2>
               <p>Automated PR reviews and issue management — powered by AI, driven by your GitHub.</p>
               <div className="da-login-actions">
-                <button className="da-btn da-btn-primary" onClick={login}>
-                  <span>⚡</span> Sign in with Auth0
-                </button>
-                <div className="da-login-divider">or</div>
-                <button className="da-btn da-btn-secondary" onClick={connectGitHub}>
+                <button className="da-btn da-btn-primary" onClick={loginWithGitHub}>
                   <span>
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
                       <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z" />
                     </svg>
                   </span>
                   Continue with GitHub
+                </button>
+              </div>
+            </div>
+
+          ) : credsLoaded && !hasGitHub ? (
+
+            <div className="da-login">
+              <div className="da-login-icon">🔑</div>
+              <h2>GitHub Access Required</h2>
+              <p>This agent needs your GitHub account. Please log in with GitHub to continue.</p>
+              <div className="da-login-actions">
+                <button className="da-btn da-btn-primary" onClick={loginWithGitHub}>
+                  <span>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                      <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0 0 24 12c0-6.63-5.37-12-12-12z" />
+                    </svg>
+                  </span>
+                  Connect GitHub
+                </button>
+                <button
+                  className="da-btn da-btn-ghost"
+                  onClick={() => logout({ logoutParams: { returnTo: window.location.origin } })}
+                >
+                  ⎋ Logout
                 </button>
               </div>
             </div>
@@ -233,48 +261,39 @@ export default function Home() {
                 <span>🔑 Agent Permissions</span>
                 <span className="da-vault-badge">
                   <span className="da-vault-dot" />
-                  Token Vault
+                  Connected Accounts
                 </span>
               </div>
 
               <div className="da-permissions-panel">
                 {credsLoading ? (
                   <div className="da-perm-empty">
-                    <span className="da-loading-txt">⏳ Loading credentials from Token Vault...</span>
-                  </div>
-                ) : credentials.length === 0 ? (
-                  <div className="da-perm-empty">
-                    <span style={{ color: "var(--text-muted)", fontSize: 12 }}>
-                      No credentials stored in Token Vault
-                    </span>
-                    <button className="da-btn da-btn-secondary da-btn-sm" onClick={connectGitHub}>
-                      + Connect GitHub
-                    </button>
+                    <span className="da-loading-txt">⏳ Loading connected accounts...</span>
                   </div>
                 ) : (
                   credentials.map((cred) => (
-                    <div key={cred.id} className="da-perm-row">
+                    <div key={cred.provider} className="da-perm-row">
                       <div className="da-perm-left">
                         <div className="da-perm-name">
                           <span className="da-perm-dot" />
-                          {cred.name}
-                          <span className="da-perm-type">{cred.credential_type}</span>
+                          {cred.provider}
+                          <span className="da-perm-type">{cred.isSocial ? "social" : "enterprise"}</span>
                         </div>
                         <div className="da-perm-scopes">
-                          {(cred.scopes?.length ? cred.scopes : ["repo", "issues:write"]).map((s) => (
+                          {["repo", "issues:write"].map((s) => (
                             <span key={s} className={`da-scope-badge ${scopeColor(s)}`}>{s}</span>
                           ))}
                         </div>
                         <div className="da-perm-meta">
-                          granted {new Date(cred.created_at).toLocaleDateString()}
+                          connection: {cred.connection}
                         </div>
                       </div>
                       <button
                         className="da-btn-revoke"
-                        onClick={() => handleRevoke(cred.id, cred.name)}
-                        disabled={revoking === cred.id}
+                        onClick={() => handleRevoke(cred.provider, cred.user_id)}
+                        disabled={revoking === cred.provider}
                       >
-                        {revoking === cred.id ? "Revoking..." : "⎋ Revoke"}
+                        {revoking === cred.provider ? "Revoking..." : "⎋ Revoke"}
                       </button>
                     </div>
                   ))
