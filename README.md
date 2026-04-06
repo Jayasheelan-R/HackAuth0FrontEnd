@@ -1,36 +1,80 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# AI DevOps Agent (HackAuth0FrontEnd)
 
-## Getting Started
+A small Next.js (App Router) frontend that provides an AI-powered DevOps agent UI. It supports GitHub-based workflows (PR reviews, creating issues) and uses Auth0 for authentication. The frontend talks to a back-end API (expected at `NEXT_PUBLIC_API_URL`) which performs the actual GitHub and AI work.
 
-First, run the development server:
+Live demo: https://hackauth0frontend.onrender.com/
+
+## Features
+
+- Login via Auth0 (GitHub connection configured in the app)
+- Run automated PR reviews and post reviews to GitHub
+- Create GitHub issues from a description
+- Shows connected provider credentials and lets users revoke them
+
+## Tech stack
+
+- Next.js 16 (App Router)
+- React 19
+- Auth0 React SDK (`@auth0/auth0-react`)
+- Tailwind CSS (configured in the project)
+
+## Quickstart — run locally
+
+Requirements:
+- Node 18+ (recommended)
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Start the dev server:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open http://localhost:3000 in your browser.
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Available npm scripts (from `package.json`):
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `dev` — runs the Next.js dev server (`next dev`)
+- `build` — builds the production app (`next build`)
+- `start` — starts the production server (`next start`)
+- `lint` — runs eslint
 
-## Learn More
+## Configuration
 
-To learn more about Next.js, take a look at the following resources:
+- Backend API: The frontend reads `NEXT_PUBLIC_API_URL` in `app/page.js` and falls back to `http://127.0.0.1:5004` if not set. Example:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+export NEXT_PUBLIC_API_URL="http://127.0.0.1:5004"
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- Auth0: The app currently initializes `Auth0Provider` in `app/layout.js`. The file contains `domain` and `clientId` values; to use your own Auth0 tenant, replace those values or refactor to read from environment variables. The provider is configured with:
 
-## Deploy on Vercel
+	- audience: `https://my-api` (the backend must accept this audience)
+	- scope: `openid profile email offline_access`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Make sure your Auth0 application allows the GitHub connection if you want users to sign in with GitHub.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## How the frontend talks to the backend
+
+The UI calls endpoints like `/agent/credentials`, `/github/review`, and `/github/issue` (see `app/page.js`). Those requests include an access token obtained via `getAccessTokenSilently`. Your backend must validate Auth0 access tokens issued for the same audience (`https://my-api`).
+
+## Deployment
+
+This project was deployed to Render (or another host). Live demo:
+
+https://hackauth0frontend.onrender.com/
+
+If you deploy elsewhere (Vercel, Render, etc.), ensure the Auth0 redirect URL is configured in your Auth0 application and the backend audience is correct.
+
+## Contributing
+
+Contributions and feedback are welcome. Please open an issue or a pull request.
+
+## License
+
+This project is licensed under the terms in the LICENSE file.
