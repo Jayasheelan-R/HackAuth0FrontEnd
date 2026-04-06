@@ -19,7 +19,7 @@ export default function RootLayout({ children }) {
       <body style={{ margin: 0, padding: 0, background: "#080c10" }}>
         <Auth0Provider
           domain="dev-ye3ygyx4dj6j4j04.eu.auth0.com"
-          clientId="RrPk2TvBT5PZf4d2FRbJ3ovsvcOo9vFl"
+          clientId="WKQrVJkENNEYraRp7EZwEbmkHBQJot49"
           authorizationParams={{
             redirect_uri: typeof window !== "undefined" ? window.location.origin : "http://localhost:3000",
             audience: "https://my-api",
