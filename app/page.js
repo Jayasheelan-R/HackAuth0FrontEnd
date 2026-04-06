@@ -19,6 +19,7 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState("");
   const [repo, setRepo] = useState("Jayasheelan-R/ai-devops-agent");
+  const [desc, setDesc] = useState("");
   const [prNumber, setPrNumber] = useState("");
   const [credentials, setCredentials] = useState([]);
   const [credsLoading, setCredsLoading] = useState(false);
@@ -158,12 +159,19 @@ export default function Home() {
       setLoading(true);
       resetOutput("⏳ Creating issue...\n");
       validateInputs();
+
+      if (!desc.trim()) {
+        throw new Error("Description cannot be empty");
+      }
+
       const token = await getToken();
+
       const data = await apiRequest("/github/issue", "POST", token, {
         repo,
         title: "AI Agent Issue",
-        body: "Created via AI DevOps Agent",
+        body: desc,
       });
+
       if (data.error) resetOutput(`❌ ${data.error}`);
       else resetOutput(`✅ Issue created:\n${data.html_url}`);
     } catch (err) {
@@ -302,6 +310,8 @@ export default function Home() {
 
               <hr className="da-divider" />
 
+              <hr className="da-divider" />
+
               <div className="da-fields">
                 <div className="da-field">
                   <label className="da-label">Target Repository</label>
@@ -315,6 +325,7 @@ export default function Home() {
                     />
                   </div>
                 </div>
+
                 <div className="da-field">
                   <label className="da-label">PR Number</label>
                   <div className="da-input-wrap">
@@ -328,15 +339,29 @@ export default function Home() {
                     />
                   </div>
                 </div>
+
+                {/* ✅ NEW DESCRIPTION FIELD */}
+                <div className="da-field">
+                  <label className="da-label">Issue Description</label>
+                  <textarea
+                    className="da-input"
+                    value={desc}
+                    onChange={(e) => setDesc(e.target.value)}
+                    placeholder="Describe the issue..."
+                    rows={4}
+                  />
+                </div>
               </div>
 
               <div className="da-btn-row">
                 <button className="da-btn da-btn-primary" onClick={runAgent} disabled={loading}>
                   <span>🚀</span> Run PR Check
                 </button>
+
                 <button className="da-btn da-btn-secondary" onClick={createIssue} disabled={loading}>
                   <span>＋</span> Create Issue
                 </button>
+
                 <button
                   className="da-btn da-btn-ghost"
                   onClick={() => logout({ logoutParams: { returnTo: window.location.origin } })}
