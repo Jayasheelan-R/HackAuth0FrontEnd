@@ -18,11 +18,14 @@ export default function RootLayout({ children }) {
       </head>
       <body style={{ margin: 0, padding: 0, background: "#080c10" }}>
         <Auth0Provider
-          domain="dev-ye3ygyx4dj6j4j04.eu.auth0.com"
-          clientId="WKQrVJkENNEYraRp7EZwEbmkHBQJot49"
+          domain={process.env.NEXT_PUBLIC_AUTH0_DOMAIN}
+          clientId={process.env.NEXT_PUBLIC_AUTH0_CLIENT_ID}
           authorizationParams={{
-            redirect_uri: typeof window !== "undefined" ? window.location.origin : "http://localhost:3000",
-            audience: "https://my-api",
+            redirect_uri:
+              typeof window !== "undefined"
+                ? window.location.origin
+                : "http://localhost:3000",
+            audience: process.env.NEXT_PUBLIC_AUTH0_AUDIENCE,
             scope: "openid profile email offline_access",
           }}
           cacheLocation="localstorage"
